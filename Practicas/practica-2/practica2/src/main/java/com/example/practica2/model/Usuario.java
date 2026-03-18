@@ -5,6 +5,12 @@ public class Usuario {
     private String name;
     private String surName;
 
+    public Usuario(String dni, String name, String surName){
+        this.dni = dni;
+        this.name = name;
+        this.surName = surName;
+    }
+
     public String getDni() {
         return dni;
     }

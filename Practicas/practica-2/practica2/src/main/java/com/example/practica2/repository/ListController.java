@@ -28,20 +28,18 @@ public class ListController {
 
     //Si fuera /listar?dni=123 seria con @requestParam pero como es listar/123 es con PathVariable
     @GetMapping("/usuarios/{dni}")
-    public ResponseEntity<List<Usuario>> listarUsuariosDni(@PathVariable String dni){
+    public ResponseEntity<Usuario> listarUsuariosDni(@PathVariable String dni){
         if (dni == null || dni.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "DNI inválido");
         }
 
-        List<Usuario> usuarioAMostrar = this.listaInterna.stream()
+        Usuario usuarioAMostrar = this.listaInterna.stream()
                 .filter(usuario -> usuario.getDni().equals(dni))
-                .toList();
+                .findFirst()
+                .orElseThrow(()-> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario no encontrado"));
 
-        if(usuarioAMostrar.isEmpty()){
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario no encontrado");
-        }
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(usuarioAMostrar);
+        return ResponseEntity.status(HttpStatus.OK).body(usuarioAMostrar);
     }
 
     @PostMapping("/usuarios")
