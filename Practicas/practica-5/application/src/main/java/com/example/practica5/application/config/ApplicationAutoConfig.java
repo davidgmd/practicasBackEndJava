@@ -23,11 +23,8 @@ import org.springframework.batch.infrastructure.item.database.JpaItemWriter;
 import org.springframework.batch.infrastructure.item.file.FlatFileItemReader;
 import org.springframework.batch.infrastructure.item.file.FlatFileItemWriter;
 import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemReaderBuilder;
-import org.springframework.batch.infrastructure.item.file.mapping.BeanWrapperFieldSetMapper;
-import org.springframework.batch.infrastructure.item.file.mapping.DefaultLineMapper;
 import org.springframework.batch.infrastructure.item.file.transform.BeanWrapperFieldExtractor;
 import org.springframework.batch.infrastructure.item.file.transform.DelimitedLineAggregator;
-import org.springframework.batch.infrastructure.item.file.transform.DelimitedLineTokenizer;
 import org.springframework.batch.infrastructure.item.support.SynchronizedItemStreamReader;
 import org.springframework.batch.infrastructure.item.support.builder.SynchronizedItemStreamReaderBuilder;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -79,31 +76,21 @@ public class ApplicationAutoConfig {
     @Bean
     @StepScope
     public FlatFileItemReader<CalleCsv> bigReader() {
-        DelimitedLineTokenizer tokenizer = new DelimitedLineTokenizer();
-        tokenizer.setDelimiter(",");
-        tokenizer.setQuoteCharacter('"');
-        tokenizer.setNames(
-                "codigoCalle",
-                "tipoVia",
-                "nombreCalle",
-                "primerNumTramo",
-                "ultimoNumTramo",
-                "barrio",
-                "codDistrito",
-                "nomDistrito"
-        );
-
-        BeanWrapperFieldSetMapper<CalleCsv> fieldSetMapper = new BeanWrapperFieldSetMapper<>();
-        fieldSetMapper.setTargetType(CalleCsv.class);
-
-        DefaultLineMapper<CalleCsv> lineMapper = new DefaultLineMapper<>();
-        lineMapper.setLineTokenizer(tokenizer);
-        lineMapper.setFieldSetMapper(fieldSetMapper);
-
         return new FlatFileItemReaderBuilder<CalleCsv>()
                 .name("bigCalleItemReader")
                 .resource(new ClassPathResource("tramos_calle_big.csv"))
-                .lineMapper(lineMapper)
+                .delimited()
+                .names(
+                        "codigoCalle",
+                        "tipoVia",
+                        "nombreCalle",
+                        "primerNumTramo",
+                        "ultimoNumTramo",
+                        "barrio",
+                        "codDistrito",
+                        "nomDistrito"
+                )
+                .targetType(CalleCsv.class)
                 .linesToSkip(1)
                 .build();
     }
