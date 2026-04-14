@@ -19,7 +19,8 @@ public class JobRunnerConfig {
             @Qualifier("jobImportarDB") Job jobImportarDB,
             @Qualifier("jobExportarCSV") Job jobExportarCSV,
             @Qualifier("jobSingleThread") Job jobSingleThread,
-            @Qualifier("jobMultiThread") Job jobMultiThread) {
+            @Qualifier("jobMultiThread") Job jobMultiThread,
+            @Qualifier("jobParallelSteps") Job jobParallelSteps){
 
         return args -> {
             if (args.length == 0) {
@@ -30,6 +31,7 @@ public class JobRunnerConfig {
                         jobExportarCSV
                         singleThread
                         multiThread
+                        parallelThread
                         """);
             }
 
@@ -79,6 +81,15 @@ public class JobRunnerConfig {
                         .toJobParameters();
 
                 jobOperator.start(jobMultiThread, params);
+                return;
+            }
+
+            if("parallelThread".equals(comando)) {
+                var params = new JobParametersBuilder()
+                        .addLong("timestamp", System.currentTimeMillis())
+                        .toJobParameters();
+
+                jobOperator.start(jobParallelSteps, params);
                 return;
             }
 

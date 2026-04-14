@@ -1,5 +1,6 @@
 package com.example.practica5.application.config;
 
+import com.example.practica5.application.batch.paralelo.*;
 import com.example.practica5.application.job.JobTimeListener;
 import com.example.practica5.application.job.ResumenBatchJobListener;
 import com.example.practica5.application.job.ResumenDistritosJobListener;
@@ -7,6 +8,7 @@ import com.example.practica5.application.model.Calle;
 import com.example.practica5.application.model.CalleCsv;
 import com.example.practica5.application.model.ResumenDistritos;
 import com.example.practica5.application.repository.CalleRepository;
+import com.example.practica5.application.repository.DocumentoFormateadoRepository;
 import com.example.practica5.application.repository.ResumenBatchRepository;
 import com.example.practica5.application.repository.ResumenDistritosBatchRepository;
 import com.example.practica5.application.step.CalleCsvToCalleProcessor;
@@ -14,14 +16,17 @@ import com.example.practica5.application.step.CalleItemProcessor;
 import jakarta.persistence.EntityManagerFactory;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.builder.FlowBuilder;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.infrastructure.item.ItemWriter;
 import org.springframework.batch.infrastructure.item.data.RepositoryItemReader;
 import org.springframework.batch.infrastructure.item.database.JpaItemWriter;
 import org.springframework.batch.infrastructure.item.file.FlatFileItemReader;
 import org.springframework.batch.infrastructure.item.file.FlatFileItemWriter;
+import org.springframework.batch.infrastructure.item.file.MultiResourceItemReader;
 import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemReaderBuilder;
 import org.springframework.batch.infrastructure.item.file.transform.BeanWrapperFieldExtractor;
 import org.springframework.batch.infrastructure.item.file.transform.DelimitedLineAggregator;
@@ -34,13 +39,19 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.core.io.WritableResource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.data.domain.Sort;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
-import org.springframework.core.task.TaskExecutor;
+import org.springframework.batch.core.job.flow.Flow;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 
@@ -127,6 +138,80 @@ public class ApplicationAutoConfig {
         RepositoryItemReader<ResumenDistritos> reader = new RepositoryItemReader<>(resumenDistritosRepository,sorts);
         reader.setMethodName("findAll");
         return reader;
+    }
+
+    @Bean
+    public DocumentoFormatterProcessor documentoFormatterProcessor() {
+        return new DocumentoFormatterProcessor();
+    }
+
+    @Bean
+    public Resource[] usuariosResources() throws IOException {
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        return resolver.getResources("file:./ficherosUsuarios/*");
+    }
+
+    @Bean
+    @StepScope
+    public FlatFileItemReader<UsuarioCompraInput> usuarioFileReader() {
+        return new FlatFileItemReaderBuilder<UsuarioCompraInput>()
+                .name("usuarioFileReader")
+                .delimited()
+                .delimiter(",")
+                .names("nombre", "dni", "direccion", "ciudad", "codPostal", "importe", "numPedido")
+                .targetType(UsuarioCompraInput.class)
+                .build();
+    }
+
+    @Bean
+    @StepScope
+    public MultiResourceItemReader<UsuarioCompraInput> multiUsuarioReader(
+            Resource[] usuariosResources,
+            FlatFileItemReader<UsuarioCompraInput> usuarioFileReader) {
+
+        MultiResourceItemReader<UsuarioCompraInput> reader =
+                new MultiResourceItemReader<>(usuarioFileReader);
+        reader.setResources(usuariosResources);
+        reader.setDelegate(usuarioFileReader);
+        return reader;
+    }
+
+    @Bean
+    public ItemWriter<DocumentoGenerado> fileWriter() {
+        return items -> {
+            for (DocumentoGenerado doc : items) {
+                Path path = Paths.get("./ficherosFinales/" + doc.getNombreArchivo());
+                Files.writeString(path, doc.getContenido());
+            }
+        };
+    }
+
+    @Bean
+    public ItemWriter<DocumentoGenerado> dbWriter(DocumentoFormateadoParaleloRepository repository) {
+        return items -> {
+            for (DocumentoGenerado doc : items) {
+                DocumentoFormateadoParalelo entity = new DocumentoFormateadoParalelo();
+                entity.setNombreArchivo(doc.getNombreArchivo());
+                entity.setContenido(doc.getContenido());
+                repository.save(entity);
+            }
+        };
+    }
+
+    @Bean("stepGuardarDocumentosBD")
+    public Step stepGuardarDocumentosBD(JobRepository jobRepository,
+                                        JpaTransactionManager transactionManager,
+                                        MultiResourceItemReader<UsuarioCompraInput> multiUsuarioReader,
+                                        DocumentoFormatterProcessor documentoFormatterProcessor,
+                                        ItemWriter<DocumentoGenerado> dbWriter) {
+
+        return new StepBuilder("stepGuardarDocumentosBD", jobRepository)
+                .<UsuarioCompraInput, DocumentoGenerado>chunk(10)
+                .reader(multiUsuarioReader)
+                .processor(documentoFormatterProcessor)
+                .writer(dbWriter)
+                .transactionManager(transactionManager)
+                .build();
     }
 
     @Bean
@@ -298,6 +383,22 @@ public class ApplicationAutoConfig {
                 .build();
     }
 
+    @Bean("stepGenerarFicheros")
+    public Step stepGenerarFicheros(JobRepository jobRepository,
+                                    JpaTransactionManager transactionManager,
+                                    MultiResourceItemReader<UsuarioCompraInput> multiUsuarioReader,
+                                    DocumentoFormatterProcessor documentoFormatterProcessor,
+                                    ItemWriter<DocumentoGenerado> fileWriter) {
+
+        return new StepBuilder("stepGenerarFicheros", jobRepository)
+                .<UsuarioCompraInput, DocumentoGenerado>chunk(10)
+                .reader(multiUsuarioReader)
+                .processor(documentoFormatterProcessor)
+                .writer(fileWriter)
+                .transactionManager(transactionManager)
+                .build();
+    }
+
     //Si hubiera más pasos se harían con .next(step)
     //Si quisieramos que en caso de error fuera a algún step .on("FAILED").to(errorStep)
     @Bean
@@ -339,6 +440,37 @@ public class ApplicationAutoConfig {
         return new JobBuilder("jobMultiThread", jobRepository)
                 .listener(timeListener)
                 .start(stepBigFileMultiThread)
+                .build();
+    }
+
+    @Bean
+    public Flow flowGenerarFicheros(@Qualifier("stepGenerarFicheros") Step stepGenerarFicheros) {
+        return new FlowBuilder<Flow>("flowGenerarFicheros")
+                .start(stepGenerarFicheros)
+                .build();
+    }
+
+    @Bean
+    public Flow flowGuardarDocumentosBD(@Qualifier("stepGuardarDocumentosBD") Step stepGuardarDocumentosBD) {
+        return new FlowBuilder<Flow>("flowGuardarDocumentosBD")
+                .start(stepGuardarDocumentosBD)
+                .build();
+    }
+
+    @Bean
+    public Job jobParallelSteps(JobRepository jobRepository,
+                                @Qualifier("flowGenerarFicheros") Flow flowGenerarFicheros,
+                                @Qualifier("flowGuardarDocumentosBD") Flow flowGuardarDocumentosBD,
+                                AsyncTaskExecutor parallelFlowTaskExecutor) {
+
+        Flow splitFlow = new FlowBuilder<Flow>("splitParallelFlow")
+                .split(parallelFlowTaskExecutor)
+                .add(flowGenerarFicheros, flowGuardarDocumentosBD)
+                .build();
+
+        return new JobBuilder("jobParallelSteps", jobRepository)
+                .start(splitFlow)
+                .end()
                 .build();
     }
 }
